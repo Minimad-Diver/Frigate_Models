@@ -30,25 +30,34 @@ jobs:
           python -m pip install --upgrade pip
           pip install super_gradients==3.7.1 onnx onnxsim
 
-      - name: Patch super_gradients weight host (matches Colab notebook)
+      - name: Patch super_gradients weight host
         run: |
           python - << 'PY'
+          import importlib
           import pathlib
+          import sys
 
-          paths = [
-            "/usr/local/lib/python3.10/site-packages/super_gradients/training/pretrained_models.py",
-            "/usr/local/lib/python3.10/site-packages/super_gradients/training/utils/checkpoint_utils.py",
-          ]
+          # Find where super_gradients is installed
+          sg = importlib.import_module("super_gradients")
+          sg_root = pathlib.Path(sg.__file__).resolve().parent
+          print("super_gradients root:", sg_root)
 
-          for p in paths:
-            fp = pathlib.Path(p)
-            if not fp.exists():
-              raise SystemExit(f"File not found: {p}")
+          # Search for files that contain the old host string
+          old = "sghub.deci.ai"
+          new = "sg-hub-nv.s3.amazonaws.com"
 
-            txt = fp.read_text()
-            txt2 = txt.replace("sghub.deci.ai", "sg-hub-nv.s3.amazonaws.com")
-            fp.write_text(txt2)
-            print(f"Patched: {p}")
+          patched = 0
+          for path in sg_root.rglob("*.py"):
+            txt = path.read_text(errors="ignore")
+            if old in txt:
+              path.write_text(txt.replace(old, new))
+              print("Patched:", path)
+              patched += 1
+
+          if patched == 0:
+            print("No files needed patching (old host string not found).")
+          else:
+            print(f"Patched {patched} file(s).")
           PY
 
       - name: Export model to ONNX
