@@ -1,0 +1,55 @@
+name: Build YOLOv9 ONNX (t, 320)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (empty repo is fine)
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1 git wget
+
+      - name: Clone YOLOv9
+        run: |
+          git clone https://github.com/WongKinYiu/yolov9.git
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r yolov9/requirements.txt
+          pip install onnx==1.18.0 onnxruntime onnx-simplifier>=0.4.1 onnxscript
+
+      - name: Download YOLOv9-t weights
+        run: |
+          wget https://github.com/WongKinYiu/yolov9/releases/download/v0.1/yolov9-t-converted.pt
+
+      - name: Patch PyTorch load issue
+        run: |
+          sed -i "s/ckpt = torch.load(attempt_download(w), map_location='cpu')/ckpt = torch.load(attempt_download(w), map_location='cpu', weights_only=False)/g" yolov9/models/experimental.py
+
+      - name: Export ONNX (320x320)
+        run: |
+          cd yolov9
+          python export.py \
+            --weights ../yolov9-t-converted.pt \
+            --imgsz 320 \
+            --simplify \
+            --include onnx
+          mv ../yolov9-t-converted.onnx yolov9-t-320.onnx
+
+      - name: Upload ONNX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yolov9-t-320-onnx
+          path: yolov9/yolov9-t-320.onnx
