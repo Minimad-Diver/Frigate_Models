@@ -86,7 +86,7 @@ jobs:
 
           # Export to ONNX in a Frigate-friendly format
           model.export(
-            output_path=f"{model_name}.onnx",
+            export_path=f"{model_name}.onnx",
             input_image_shape=(input_size, input_size),
             detection_output_format=DetectionOutputFormatMode.BATCH_FORMAT,
             simplify=True,
