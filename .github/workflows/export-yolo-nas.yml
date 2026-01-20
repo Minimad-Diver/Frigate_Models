@@ -1,0 +1,96 @@
+name: Export YOLO-NAS Pretrained (ONNX)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_size:
+        description: "YOLO-NAS size: s, m, l"
+        required: true
+        default: "s"
+      input_size:
+        description: "Model input size (e.g. 320 or 640)"
+        required: true
+        default: "320"
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install super_gradients==3.7.1 onnx onnxsim
+
+      - name: Patch super_gradients weight host (matches Colab notebook)
+        run: |
+          python - << 'PY'
+          import pathlib
+
+          paths = [
+            "/usr/local/lib/python3.10/site-packages/super_gradients/training/pretrained_models.py",
+            "/usr/local/lib/python3.10/site-packages/super_gradients/training/utils/checkpoint_utils.py",
+          ]
+
+          for p in paths:
+            fp = pathlib.Path(p)
+            if not fp.exists():
+              raise SystemExit(f"File not found: {p}")
+
+            txt = fp.read_text()
+            txt2 = txt.replace("sghub.deci.ai", "sg-hub-nv.s3.amazonaws.com")
+            fp.write_text(txt2)
+            print(f"Patched: {p}")
+          PY
+
+      - name: Export model to ONNX
+        run: |
+          python - << 'PY'
+          import os
+          from super_gradients.common.object_names import Models
+          from super_gradients.conversion import DetectionOutputFormatMode
+          from super_gradients.training import models
+
+          model_size = os.environ.get("MODEL_SIZE", "s").lower()
+          input_size = int(os.environ.get("INPUT_SIZE", "320"))
+
+          model_map = {
+            "s": Models.YOLO_NAS_S,
+            "m": Models.YOLO_NAS_M,
+            "l": Models.YOLO_NAS_L,
+          }
+
+          if model_size not in model_map:
+            raise SystemExit("MODEL_SIZE must be one of: s, m, l")
+
+          model_name = f"yolo_nas_{model_size}_{input_size}"
+
+          model = models.get(model_map[model_size], pretrained_weights="coco")
+
+          # Export to ONNX in a Frigate-friendly format
+          model.export(
+            output_path=f"{model_name}.onnx",
+            input_image_shape=(input_size, input_size),
+            detection_output_format=DetectionOutputFormatMode.BATCH_FORMAT,
+            simplify=True,
+          )
+
+          print("Exported:", f"{model_name}.onnx")
+          PY
+        env:
+          MODEL_SIZE: ${{ inputs.model_size }}
+          INPUT_SIZE: ${{ inputs.input_size }}
+
+      - name: Upload ONNX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yolo-nas-onnx
+          path: "*.onnx"
